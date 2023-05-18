@@ -4,7 +4,7 @@ defmodule HomeVisitService.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      HomeVisitService.Repo
+      HomeVisitService.Repo,
     ]
 
     # https://hexdocs.pm/elixir/Supervisor.html

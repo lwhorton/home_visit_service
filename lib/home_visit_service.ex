@@ -9,7 +9,7 @@ defmodule HomeVisitService do
   alias HomeVisitService.VisitSolicitation
   alias HomeVisitService.VisitFulfillment
 
-  def main(argv) do
+  def main(argv \\ []) do
     {subcommand, cfg, _pargs} = parse_subcommand(argv)
 
     {:ok, {command, pargs}} = parse_command!({subcommand, cfg, argv})
@@ -19,9 +19,14 @@ defmodule HomeVisitService do
 
   def subcommands() do
     [
-      strict: [
+      switches: [
         create_user: :boolean,
-        grant_role: :boolean
+        grant_role: :boolean,
+        revoke_role: :boolean,
+        get_user: :boolean,
+        solicit_visit: :boolean,
+        fulfill_visit: :boolean,
+        grant_balance: :boolean
       ]
     ]
   end
@@ -91,6 +96,16 @@ defmodule HomeVisitService do
     ]
   end
 
+  def grant_balance_cfg() do
+    [
+      strict: [
+        grant_balance: :boolean,
+        user_id: :integer,
+        balance: :integer
+      ]
+    ]
+  end
+
   def parse_subcommand(argv) do
     {pargs, _args, invalid} = OptionParser.parse(argv, subcommands())
 
@@ -116,6 +131,9 @@ defmodule HomeVisitService do
 
       Keyword.get(pargs, :fulfill_visit) ->
         {:fulfill_visit, fulfill_visit_cfg(), pargs}
+
+      Keyword.get(pargs, :grant_balance) ->
+        {:grant_balance, grant_balance_cfg(), pargs}
 
       :else ->
         Logger.error("unrecognized command: #{argv}")
@@ -162,7 +180,7 @@ defmodule HomeVisitService do
          duration <- Keyword.fetch!(pargs, :duration),
          commencement <- Keyword.fetch!(pargs, :commencement),
          tasks <- Keyword.fetch!(pargs, :tasks),
-         {:ok, dt, _offset} = foo <- DateTime.from_iso8601(commencement) do
+         {:ok, dt, _offset} <- DateTime.from_iso8601(commencement) do
       {:ok,
        {:solicit_visit,
         %{member_id: member_id, duration: duration, commencement: dt, tasks: tasks}}}
@@ -173,15 +191,23 @@ defmodule HomeVisitService do
     with pal_id <- Keyword.fetch!(pargs, :pal_id),
          solicitation_id <- Keyword.fetch!(pargs, :visit_solicitation_id),
          fulfilled <- Keyword.fetch!(pargs, :fulfilled),
-         {:ok, dt, _offset} = foo <- DateTime.from_iso8601(fulfilled) do
+         {:ok, dt, _offset} <- DateTime.from_iso8601(fulfilled) do
       {:ok,
        {:fulfill_visit, %{pal_id: pal_id, visit_solicitation_id: solicitation_id, fulfilled: dt}}}
+    end
+  end
+
+  def validate({:grant_balance, pargs}) do
+    with user_id <- Keyword.fetch!(pargs, :user_id),
+         balance <- Keyword.fetch!(pargs, :balance) do
+      {:ok, {:grant_balance, %{user_id: user_id, balance: balance}}}
     end
   end
 
   def execute({:create_user, %{name: name, surname: surname, email: email, roles: roles} = user}) do
     roles = Enum.into(roles, MapSet.new())
 
+    # todo: catch constraint errors
     {:ok, inserted} =
       %User{
         name: name,
@@ -202,7 +228,7 @@ defmodule HomeVisitService do
     new_roles = MapSet.union(existing_roles, MapSet.new(roles)) |> :erlang.term_to_binary()
 
     user = Changeset.change(user, roles: new_roles)
-    updated = Repo.update!(user)
+    Repo.update!(user)
     execute({:get_user, %{user_id: user_id}})
   end
 
@@ -212,14 +238,13 @@ defmodule HomeVisitService do
     new_roles = MapSet.difference(existing_roles, MapSet.new(roles)) |> :erlang.term_to_binary()
 
     user = Changeset.change(user, roles: new_roles)
-    updated = Repo.update!(user)
+    Repo.update!(user)
     execute({:get_user, %{user_id: user_id}})
   end
 
   def execute({:get_user, %{user_id: user_id}}) do
-    user =
-      Repo.get!(User, user_id)
-      |> Map.update(:roles, [], fn r -> :erlang.binary_to_term(r) |> Enum.into([]) end)
+    Repo.get!(User, user_id)
+    |> Map.update(:roles, [], fn r -> :erlang.binary_to_term(r) |> Enum.into([]) end)
   end
 
   def execute(
@@ -238,6 +263,9 @@ defmodule HomeVisitService do
             tasks: tasks
           })
 
+        # todo: we'd probably want better tracking around balance_minutes on
+        # soliciting a visit (so you cant cash a check the bank can't handle)
+
         inserted
 
       err ->
@@ -248,15 +276,15 @@ defmodule HomeVisitService do
   def execute(
         {:fulfill_visit, %{visit_solicitation_id: visit_id, pal_id: pal_id, fulfilled: fulfilled}}
       ) do
-    # todo: make sure the fulfillment isn't in the future, other guardian
-    # rules, etc.
+    # todo: make sure the fulfillment isn't in the future, the pal isnt
+    # fulfilling their own solicitation, etc.
     pal = execute({:get_user, %{user_id: pal_id}})
 
     # todo: could make this a cli command
     solicitation = Repo.get!(VisitSolicitation, visit_id)
 
     # todo: could also make this a cli command
-    fulfillment =
+    existing_fulfillment =
       Repo.one(
         from(f in VisitFulfillment,
           join: s in VisitSolicitation,
@@ -265,30 +293,30 @@ defmodule HomeVisitService do
         )
       )
 
-    case can_fulfill_visit?(pal, solicitation, fulfillment) do
+    case can_fulfill_visit?(pal, existing_fulfillment) do
       true ->
         {:ok, result} =
           Repo.transaction(fn repo ->
-            {:ok, fulfillment} =
-              repo.insert(%VisitFulfillment{
-                # todo: we could probably come up with a better model around
-                # member(s) fulfilling a visit
-                visit_solicitations_id: solicitation.id,
-                member_id: solicitation.solicitor,
-                pal_id: pal_id,
-                fulfilled: fulfilled
-              })
-
             # avoid a potentially nasty bug by re-fetching the user again inside
             # the transaction, even though we already have a handle on one
             pal = execute({:get_user, %{user_id: pal_id}})
+
+            {:ok, fulfillment} =
+              repo.insert(%VisitFulfillment{
+                # todo: we could probably come up with a better relation model
+                # around multiple member(s) fulfilling a visit, partial visits
+                visit_solicitations_id: solicitation.id,
+                member_id: solicitation.solicitor,
+                pal_id: pal.id,
+                fulfilled: fulfilled
+              })
 
             pal =
               Changeset.change(pal,
                 balance_minutes: calculate_credit_balance(pal, solicitation)
               )
 
-            Repo.update!(pal)
+            repo.update!(pal)
 
             member = execute({:get_user, %{user_id: solicitation.solicitor}})
 
@@ -297,7 +325,7 @@ defmodule HomeVisitService do
                 balance_minutes: calculate_debit_balance(member, solicitation)
               )
 
-            Repo.update!(member)
+            repo.update!(member)
 
             fulfillment
           end)
@@ -307,6 +335,22 @@ defmodule HomeVisitService do
       err ->
         err
     end
+  end
+
+  def execute({:grant_balance, %{user_id: user_id, balance: balance}}) do
+    {:ok, result} =
+      Repo.transaction(fn repo ->
+        user = execute({:get_user, %{user_id: user_id}})
+
+        change =
+          Changeset.change(user,
+            balance_minutes: user.balance_minutes + balance
+          )
+
+        repo.update!(change)
+      end)
+
+    result
   end
 
   @fee 0.15
@@ -331,7 +375,7 @@ defmodule HomeVisitService do
     end
   end
 
-  def can_fulfill_visit?(%{roles: roles} = user, visit_solicitation, fulfillment) do
+  def can_fulfill_visit?(%{roles: roles} = user, fulfillment) do
     with {_, true} <- {:already_fulfilled, is_nil(fulfillment)},
          {_, true} <- {:role, Enum.member?(roles, "pal")} do
       true
@@ -368,6 +412,7 @@ defmodule HomeVisitService do
 
   def invalidate!(:subcommand, invalids, halt) when is_list(invalids) and length(invalids) > 0 do
     Logger.error("subcommand was invoked incorrectly:")
+    IO.inspect(wtf: inspect(invalids))
 
     invalids
     |> Enum.map(fn {opt, err} ->
@@ -385,7 +430,6 @@ defmodule HomeVisitService do
       Logger.error("argument error: #{opt} #{err}")
     end)
 
-    help!(:args)
     halt.()
   end
 
@@ -393,18 +437,24 @@ defmodule HomeVisitService do
     :well_formed
   end
 
-  # quick and dirty "--help" flag
-  def help!(:args) do
-    Logger.error("invalid args...")
-
-    config_as_string =
-      Enum.reduce(@parse_config[:strict], "", fn {opt, type}, acc ->
-        acc <> "\n" <> "option \"--#{opt}\" expects type: #{type}"
-      end)
-
-    Logger.error(config_as_string)
+  def halt!() do
+    Application.get_env(:home_visit_service, :IO)
   end
+end
 
-  # todo: revert to this before deploying: System.halt(1)
+defmodule HomeVisitService.IO.Behaviour do
+  @callback halt!() :: no_return()
+end
+
+defmodule HomeVisitService.CLI do
+  @behaviour HomeVisitService.IO.Behaviour
+  @impl true
+  def halt!(), do: System.halt(1)
+end
+
+defmodule HomeVisitService.Test.CLI do
+  require Logger
+  @behaviour HomeVisitService.IO.Behaviour
+  @impl true
   def halt!(), do: Logger.error("Halted!")
 end

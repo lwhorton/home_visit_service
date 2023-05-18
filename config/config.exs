@@ -6,4 +6,6 @@ config :home_visit_service,
 config :home_visit_service, HomeVisitService.Repo,
   database: "database.db"
 
+config :home_visit_service, :IO, HomeVisitService.CLI
+
 import_config "#{Mix.env()}.exs"

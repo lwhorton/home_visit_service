@@ -215,7 +215,7 @@ defmodule HomeVisitServiceTest do
            }}
         )
 
-      already_fulfillment =
+      _already_fulfillment =
         Sut.execute(
           {:fulfill_visit,
            %{
@@ -235,7 +235,7 @@ defmodule HomeVisitServiceTest do
                   }}
                )
 
-      assert reason =~ "1 has already been fulfilled"
+      assert reason =~ "has already been fulfilled"
     end
   end
 
@@ -265,6 +265,10 @@ defmodule HomeVisitServiceTest do
            }}
         )
 
+      user = Sut.execute({:get_user, %{user_id: user_id}})
+
+      # todo: this should be better- put a hold on available balance
+      assert user.balance_minutes == 121
       assert res.solicitor == user_id
       assert res.commencement == ~U[2023-05-18 12:00:00Z]
       assert res.duration_minutes == 120
