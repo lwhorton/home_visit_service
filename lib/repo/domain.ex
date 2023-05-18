@@ -1,3 +1,4 @@
+# todo: this could certainly be broken out into better contexts, and more files
 defmodule HomeVisitService.User do
   use Ecto.Schema
 
@@ -5,7 +6,6 @@ defmodule HomeVisitService.User do
     field(:name, :string)
     field(:surname, :string)
     field(:email, :string)
-    field(:account_id, :id)
     field(:roles, :binary)
     field(:balance_minutes, :integer)
   end
@@ -29,5 +29,6 @@ defmodule HomeVisitService.VisitFulfillment do
     field(:visit_solicitations_id, :id)
     field(:member_id, :id)
     field(:pal_id, :id)
+    field(:fulfilled, :utc_datetime)
   end
 end

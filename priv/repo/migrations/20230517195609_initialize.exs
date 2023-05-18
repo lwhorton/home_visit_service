@@ -8,7 +8,7 @@ defmodule HomeVisitService.Repo.Migrations.CreateUsers do
       add(:surname, :string, null: false)
       add(:email, :string, null: false)
       add(:roles, :binary)
-      add(:balance_minutes, :integer)
+      add(:balance_minutes, :integer, default: 0)
     end
 
     create(unique_index(:users, [:email]))
@@ -25,6 +25,7 @@ defmodule HomeVisitService.Repo.Migrations.CreateUsers do
       add(:visit_solicitations_id, references("visit_solicitations"), null: false)
       add(:member_id, references("users"), null: false)
       add(:pal_id, references("users"), null: false)
+      add(:fulfilled, :utc_datetime, null: false)
     end
   end
 end

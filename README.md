@@ -62,6 +62,7 @@ visit_fulfillments
 visit_solicitations_id ->fkey visit_solicitations.id
 member_id ->fkey users.id
 pal_id ->fkey users.id
+fulfilled "2023-01-01 00:00:00Z"
 ```
 
 - requires further exploration to determine if there's really a distinction
