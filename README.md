@@ -77,15 +77,15 @@ Given more time, we should probably...
   such as capturing the fee at the time of the fulfillment, recording the
   success/failure of tasks, actual/presumed duration of fulfillment, etc.. i
   don't want to spend too much time here boiling the ocean, though.
-- we probably need some sort of mutex management around balances. soliciting a
-  visit should probably put a hold on available minutes, but those minutes are
-  freed after some time, for example.
+- introduce some sort of mutex management around balances. soliciting a visit
+  should probably put a hold on available minutes, but those minutes are freed
+  after some time, for example.
 
 ## general implementation guidance
 
-you will probably need to install sqllite3. try homebrew, if on macos.
+you will probably need to install `sqllite3`. try homebrew, if on macos.
 
-you shouldn't need elixir or erlang installed, since this is a bakeware binary.
+you shouldn't need elixir or erlang installed, since this is a burrito binary.
 see `.tool-versions` for details, though, if something is amiss.
 
 we're not super concerned with the cleanliness of CLI outputs. it takes a while
@@ -99,13 +99,13 @@ supervisor. the built-in, lightweight `escript` feature doesn't support NIF libs
 (so Ecto and its backing implementations are out of the question). deploying a
 binary that can easily read from the command line is a bit harder than it should
 be. building a "running" CLI (keeping the prompt alive) requires yet more work
-setting up supervised IO.gets() loops. given all these concerns, and a limited
+setting up supervised `IO.gets()` loops. given all these concerns, and a limited
 amount of time to work on an example application, interactions with the
 home_services_application are simply going to happen through remote process
-execution.
+execution (see below).
 
 the application release is prebuilt. `HomeVisitService.main(argv)` is our
-entrypoint, and it expects a standard unix* argv list of strings.
+entrypoint, and it expects a standard unix argv list of strings.
 
 ```
 > ./home_visit_service start
